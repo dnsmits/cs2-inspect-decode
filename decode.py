@@ -7,7 +7,7 @@ from typing import Any
 
 
 DEFAULT_INPUT = (
-    "steam://run/730//+csgo_econ_action_preview%204757F1EFEF8CEB465F5967AC466F4577437FB5D4FC9B44078E442F65375FEE9768B7"
+    "steam://run/730//+csgo_econ_action_preview%20EBFB795B5C7952EAF3D6CB1BE3C3EFDBE2D33A097B1FE8AB09ECA3EBBBA183EE9BE349EAFCE3EBFBEDD65227CCAAAEE9DA31D5A6AD15C1ABBB7F75EE52D4C0D9"
 )
 
 
@@ -228,6 +228,32 @@ def unwrap_masked_payload(data: bytes) -> bytes:
     return data
 
 
+def score_decoded_item(item: dict[str, Any]) -> int:
+    score = 0
+
+    if "defindex" in item:
+        score += 4
+
+    for field in (
+        "itemid",
+        "accountid",
+        "paintindex",
+        "paintseed",
+        "quality",
+        "rarity",
+        "inventory",
+        "origin",
+        "paintwear",
+    ):
+        if field in item:
+            score += 1
+
+    score += len(item.get("stickers", []))
+    score += len(item.get("keychains", []))
+    score += len(item.get("variations", []))
+    return score
+
+
 def decode_masked_payload(hex_payload: str) -> tuple[str, dict[str, Any], bytes]:
     raw = binascii.unhexlify(hex_payload)
 
@@ -242,13 +268,21 @@ def decode_masked_payload(hex_payload: str) -> tuple[str, dict[str, Any], bytes]
     ]
 
     last_error = None
+    best_candidate = None
     for name, transformed in candidates:
         try:
             parsed = parse_econ_item(unwrap_masked_payload(transformed))
-            if parsed.get("defindex") and parsed.get("paintindex"):
-                return name, parsed, transformed
+            score = score_decoded_item(parsed)
+            if score >= 5 and (
+                best_candidate is None or score > best_candidate[0]
+            ):
+                best_candidate = (score, name, parsed, transformed)
         except Exception as error:
             last_error = error
+
+    if best_candidate is not None:
+        _, name, parsed, transformed = best_candidate
+        return name, parsed, transformed
 
     if last_error is not None:
         raise last_error
