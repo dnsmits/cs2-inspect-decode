@@ -7,12 +7,70 @@ from typing import Any
 
 
 DEFAULT_INPUT = (
-    "steam://run/730//+csgo_econ_action_preview%20EBFB795B5C7952EAF3D6CB1BE3C3EFDBE2D33A097B1FE8AB09ECA3EBBBA183EE9BE349EAFCE3EBFBEDD65227CCAAAEE9DA31D5A6AD15C1ABBB7F75EE52D4C0D9"
+    "steam://run/730//+csgo_econ_action_preview%204050ADEED1DDF741587D60B04868447044788EECA8B24300934222454840508069224548425080692245484350E66F284E304423C2267B"
+)
+HEX_PAYLOAD_PATTERN = r"csgo_econ_action_preview(?:%20| )([0-9A-Fa-f]+)$"
+MIN_DECODE_SCORE = 5
+
+STICKER_VARINT_FIELDS = {
+    1: "slot",
+    2: "sticker_id",
+    6: "tint_id",
+    10: "pattern",
+    11: "highlight_reel",
+    12: "wrapped_sticker",
+}
+
+STICKER_FIXED32_FIELDS = {
+    3: "wear",
+    4: "scale",
+    5: "rotation",
+    7: "offset_x",
+    8: "offset_y",
+    9: "offset_z",
+}
+
+ITEM_VARINT_FIELDS = {
+    1: "accountid",
+    2: "itemid",
+    3: "defindex",
+    4: "paintindex",
+    5: "rarity",
+    6: "quality",
+    8: "paintseed",
+    9: "killeaterscoretype",
+    10: "killeatervalue",
+    13: "inventory",
+    14: "origin",
+    15: "questid",
+    16: "dropreason",
+    17: "musicindex",
+    19: "petindex",
+    21: "style",
+    23: "upgrade_level",
+}
+
+ITEM_STICKER_LIST_FIELDS = {
+    12: "stickers",
+    20: "keychains",
+    22: "variations",
+}
+
+SCORED_FIELDS = (
+    "itemid",
+    "accountid",
+    "paintindex",
+    "paintseed",
+    "quality",
+    "rarity",
+    "inventory",
+    "origin",
+    "paintwear",
 )
 
 
 def extract_hex_payload(value: str) -> str:
-    match = re.search(r"csgo_econ_action_preview(?:%20| )([0-9A-Fa-f]+)$", value)
+    match = re.search(HEX_PAYLOAD_PATTERN, value)
     if match:
         return match.group(1).upper()
 
@@ -102,37 +160,16 @@ def parse_sticker(buffer: bytes) -> dict[str, Any]:
         field_number = tag >> 3
         wire_type = tag & 0x7
 
-        if field_number in {1, 2, 6, 10, 11, 12}:
+        field_name = STICKER_VARINT_FIELDS.get(field_number)
+        if field_name is not None:
             value, offset = read_varint(buffer, offset)
-            if field_number == 1:
-                sticker["slot"] = value
-            elif field_number == 2:
-                sticker["sticker_id"] = value
-            elif field_number == 6:
-                sticker["tint_id"] = value
-            elif field_number == 10:
-                sticker["pattern"] = value
-            elif field_number == 11:
-                sticker["highlight_reel"] = value
-            elif field_number == 12:
-                sticker["wrapped_sticker"] = value
+            sticker[field_name] = value
             continue
 
-        if field_number in {3, 4, 5, 7, 8, 9}:
+        field_name = STICKER_FIXED32_FIELDS.get(field_number)
+        if field_name is not None:
             raw_value, offset = read_fixed32(buffer, offset)
-            value = fixed32_to_float(raw_value)
-            if field_number == 3:
-                sticker["wear"] = value
-            elif field_number == 4:
-                sticker["scale"] = value
-            elif field_number == 5:
-                sticker["rotation"] = value
-            elif field_number == 7:
-                sticker["offset_x"] = value
-            elif field_number == 8:
-                sticker["offset_y"] = value
-            elif field_number == 9:
-                sticker["offset_z"] = value
+            sticker[field_name] = fixed32_to_float(raw_value)
             continue
 
         offset = skip_field(buffer, offset, wire_type)
@@ -153,42 +190,10 @@ def parse_econ_item(buffer: bytes) -> dict[str, Any]:
         field_number = tag >> 3
         wire_type = tag & 0x7
 
-        if field_number in {1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 19, 21, 23}:
+        field_name = ITEM_VARINT_FIELDS.get(field_number)
+        if field_name is not None:
             value, offset = read_varint(buffer, offset)
-            if field_number == 1:
-                item["accountid"] = value
-            elif field_number == 2:
-                item["itemid"] = value
-            elif field_number == 3:
-                item["defindex"] = value
-            elif field_number == 4:
-                item["paintindex"] = value
-            elif field_number == 5:
-                item["rarity"] = value
-            elif field_number == 6:
-                item["quality"] = value
-            elif field_number == 8:
-                item["paintseed"] = value
-            elif field_number == 9:
-                item["killeaterscoretype"] = value
-            elif field_number == 10:
-                item["killeatervalue"] = value
-            elif field_number == 13:
-                item["inventory"] = value
-            elif field_number == 14:
-                item["origin"] = value
-            elif field_number == 15:
-                item["questid"] = value
-            elif field_number == 16:
-                item["dropreason"] = value
-            elif field_number == 17:
-                item["musicindex"] = value
-            elif field_number == 19:
-                item["petindex"] = value
-            elif field_number == 21:
-                item["style"] = value
-            elif field_number == 23:
-                item["upgrade_level"] = value
+            item[field_name] = value
             continue
 
         if field_number == 7:
@@ -201,15 +206,10 @@ def parse_econ_item(buffer: bytes) -> dict[str, Any]:
             item["customname"] = raw.decode("utf-8")
             continue
 
-        if field_number in {12, 20, 22}:
+        sticker_list_name = ITEM_STICKER_LIST_FIELDS.get(field_number)
+        if sticker_list_name is not None:
             raw, offset = read_length_delimited(buffer, offset)
-            parsed = parse_sticker(raw)
-            if field_number == 12:
-                item["stickers"].append(parsed)
-            elif field_number == 20:
-                item["keychains"].append(parsed)
-            elif field_number == 22:
-                item["variations"].append(parsed)
+            item[sticker_list_name].append(parse_sticker(raw))
             continue
 
         if field_number == 18:
@@ -234,17 +234,7 @@ def score_decoded_item(item: dict[str, Any]) -> int:
     if "defindex" in item:
         score += 4
 
-    for field in (
-        "itemid",
-        "accountid",
-        "paintindex",
-        "paintseed",
-        "quality",
-        "rarity",
-        "inventory",
-        "origin",
-        "paintwear",
-    ):
+    for field in SCORED_FIELDS:
         if field in item:
             score += 1
 
@@ -260,33 +250,14 @@ def decode_masked_payload(hex_payload: str) -> tuple[str, dict[str, Any], bytes]
     if not raw:
         raise ValueError("Masked payload is empty")
 
-    candidates = [
-        ("plain", raw),
-        # Some masked links use a per-payload XOR byte; first payload byte is the mask key.
-        ("xor_first_byte", xor_mask(raw, raw[0])),
-        ("xor_fb", xor_mask(raw, 0xFB)),
-    ]
+    transformed = xor_mask(raw, raw[0])
+    parsed = parse_econ_item(unwrap_masked_payload(transformed))
+    score = score_decoded_item(parsed)
 
-    last_error = None
-    best_candidate = None
-    for name, transformed in candidates:
-        try:
-            parsed = parse_econ_item(unwrap_masked_payload(transformed))
-            score = score_decoded_item(parsed)
-            if score >= 5 and (
-                best_candidate is None or score > best_candidate[0]
-            ):
-                best_candidate = (score, name, parsed, transformed)
-        except Exception as error:
-            last_error = error
+    if score < MIN_DECODE_SCORE:
+        raise ValueError("Failed to decode inspect payload")
 
-    if best_candidate is not None:
-        _, name, parsed, transformed = best_candidate
-        return name, parsed, transformed
-
-    if last_error is not None:
-        raise last_error
-    raise ValueError("Failed to decode inspect payload")
+    return "xor_first_byte", parsed, transformed
 
 
 def main() -> None:
